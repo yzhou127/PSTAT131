@@ -11,7 +11,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-The goal of my final project is to predict the potential YouTube views of the title track music video for Straykids' future third album. Straykids is a South Korean boy group under JYP Entertainment. 
+The goal of my final project is to predict the potential YouTube views of the title track music video for Straykids' future third album. Straykids is a South Korean boy group under JYP Entertainment.
 
 ### An overview of my dataset
 I will scrape my dataset basically from YouTube API, kaggle. Here's the source:

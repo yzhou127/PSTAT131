@@ -25,17 +25,45 @@ The full abalone data set is located in the `\data` subdirectory. Read it into *
 
 Make sure you load the `tidyverse` and `tidymodels`!
 
+
+```{r}
+library(dplyr)
+library(tidyverse)
+library(tidymodels)
+```
+
+```{r,results='hide'}
+abalone <- read_csv(file = "data/abalone.csv")
+```
+
 ### Question 1
 
 Your goal is to predict abalone age, which is calculated as the number of rings plus 1.5. Notice there currently is no `age` variable in the data set. Add `age` to the data set.
 
 Assess and describe the distribution of `age`.
+```{r}
+abalone <- abalone %>% 
+ mutate(age = rings + 1.5)
+
+abalone %>% 
+ ggplot(aes(x = age)) +
+ geom_histogram(bins = 30)
+```
+The distribution of age is relatively normal distributed but slightly positively skewed because of the tail at the right side. Most of the abalone were distributed in age between 9 and 13 years. 
 
 ### Question 2
 
 Split the abalone data into a training set and a testing set. Use stratified sampling. You should decide on appropriate percentages for splitting the data.
 
 *Remember that you'll need to set a seed at the beginning of the document to reproduce your results.*
+
+```{r}
+set.seed(1007) 
+abalone_split <- abalone %>% initial_split(strata = age, 
+ prop = 0.80)
+abalone_train <- training(abalone_split)
+abalone_test <- testing(abalone_split)
+```
 
 ### Question 3
 
@@ -57,9 +85,25 @@ Steps for your recipe:
 
 You'll need to investigate the `tidymodels` documentation to find the appropriate step functions to use.
 
+```{r}
+abalone_recipe <- recipe(age ~ . , data = abalone_train) %>% 
+ step_rm(rings) %>% # remove rings 
+ step_dummy(all_nominal_predictors()) %>% 
+ step_interact(terms = ~ starts_with("type"):shucked_weight +
+ longest_shell:diameter + 
+ shucked_weight:shell_weight) %>% 
+ step_normalize(all_predictors())
+```
+We remove rings from our dataset because we are training the model to predict rings, which is a predictor of age. 
+
 ### Question 4
 
 Create and store a linear regression object using the `"lm"` engine.
+
+```{r}
+lm_model <- linear_reg() %>% 
+ set_engine("lm")
+```
 
 ### Question 5
 
@@ -69,9 +113,26 @@ Now:
 2.  add the model you created in Question 4, and
 3.  add the recipe that you created in Question 3.
 
+```{r}
+abalone_workflow <- workflow() %>% 
+  add_model(lm_model) %>%
+  add_recipe(abalone_recipe) 
+
+abalone_fit <- fit(abalone_workflow, abalone_train)
+```
+
 ### Question 6
 
 Use your `fit()` object to predict the age of a hypothetical female abalone with longest_shell = 0.50, diameter = 0.10, height = 0.30, whole_weight = 4, shucked_weight = 1, viscera_weight = 2, shell_weight = 1.
+
+```{r}
+hypothetical_abalone <- tibble(type = "F", longest_shell = 0.50,
+ diameter = 0.10, height = 0.30, whole_weight = 4,
+ shucked_weight = 1, viscera_weight = 2,
+ shell_weight = 1, rings = 0)
+predict(abalone_fit, new_data = hypothetical_abalone)
+```
+The age of the hypothetical abalone is predicted to be about 21.1 years.
 
 ### Question 7
 
@@ -81,33 +142,10 @@ Now you want to assess your model's performance. To do this, use the `yardstick`
 2.  Use `predict()` and `bind_cols()` to create a tibble of your model's predicted values from the **training data** along with the actual observed ages (these are needed to assess your model's performance).
 3.  Finally, apply your metric set to the tibble, report the results, and interpret the *R^2^* value.
 
-### Required for 231 Students
-
-In lecture, we presented the general bias-variance tradeoff, which takes the form:
-
-$$
-E[(y_0 - \hat{f}(x_0))^2]=Var(\hat{f}(x_0))+[Bias(\hat{f}(x_0))]^2+Var(\epsilon)
-$$
-
-where the underlying model $Y=f(X)+\epsilon$ satisfies the following:
-
-- $\epsilon$ is a zero-mean random noise term and $X$ is non-random (all randomness in $Y$ comes from $\epsilon$);
-- $(x_0, y_0)$ represents a test observation, independent of the training set, drawn from the same model;
-- $\hat{f}(.)$ is the estimate of $f$ obtained from the training set.
-
-#### Question 8
-
-Which term(s) in the bias-variance tradeoff above represent the reproducible error? Which term(s) represent the irreducible error?
-
-#### Question 9
-
-Using the bias-variance tradeoff above, demonstrate that the expected test error is always at least as large as the irreducible error.
-
-#### Question 10
-
-Prove the bias-variance tradeoff.
-
-Hints:
-
-- use the definition of $Bias(\hat{f}(x_0))=E[\hat{f}(x_0)]-f(x_0)$;
-- reorganize terms in the expected test error by adding and subtracting $E[\hat{f}(x_0)]$
+```{r}
+multi_metric <- metric_set(rsq, rmse, mae)
+abalone_predict <- predict(abalone_fit, abalone_train) %>% 
+ bind_cols(abalone_train %>% select(age))
+multi_metric(abalone_predict, truth = age, estimate = .pred)
+```
+*R^2^* is a measure of the percentage of total variation in the dependant variable that is accounted for by the independent variable. The *R^2^* value here is around 0.56 which is kind of low. It indicates that around 56% of the variability in the abalone age cannot be explained by the model. It might because the relationship between age and the predictors is not necessarily linear. 

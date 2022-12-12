@@ -1,0 +1,12 @@
+name,data_type,missing,complete,n,empty,n_unique,min,max,mean,sd,p0,p25,p50,p75,p100,hist
+id,character,0,683,683,0,683,11,11,,,,,,,,
+title,character,0,683,683,0,683,13,100,,,,,,,,
+publication_date,character,0,683,683,0,683,20,20,,,,,,,,
+description,character,0,683,683,1,683,0,2516,,,,,,,,
+channel_id,character,0,683,683,0,1,24,24,,,,,,,,
+channel_title,character,0,683,683,0,1,10,10,,,,,,,,
+viewCount,integer,0,683,683,,,,,2665964.14,5702651.13,0,505543,909949,2125503.5,64392799,▇▁▁▁▁▁▁▁
+likeCount,integer,0,683,683,,,,,204683.78,257274.59,44,62983,117082,235423,2433392,▇▁▁▁▁▁▁▁
+favoriteCount,integer,0,683,683,,,,,0,0,0,0,0,0,0,▁▁▁▇▁▁▁▁
+commentCount,integer,2,681,683,,,,,7614.07,13949.9,0,1524,3090,7077,186105,▇▁▁▁▁▁▁▁
+url,character,0,683,683,0,683,43,43,,,,,,,,

@@ -1,0 +1,447 @@
+---
+title: "PSTAT131 Final Project"
+author: "Ying Zhou"
+date: "12/1/2022"
+output:
+  pdf_document: default
+  always_allow_html: true
+  html_document: null
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The purpose of the project is to generate a model that predict the potential YouTube views for the video of Stray Kids.
+
+# Who is Stray Kids? 
+
+Stray Kids is a South Korean boy band formed by JYP Entertainment through the 2017 reality show of the same name. The group is composed of eight members: Bang Chan, Lee Know, Changbin, Hyunjin, Han, Felix, Seungmin, and I.N. According to Bang Chan, the leader of the band, their goal is to deliver their music and give strength to people who really need it. Stray Kids' music is generally K-pop, hip hop, and electronic. And they can also be considered as a self-producing band, with members involved in songwriting and composing, and arranging. After debut in 2017, their popularity continues to rise. In 2022, they started their second world tour. On April 20, 2022, they notched their first chart-topper on Billboard 200 album chart, with their EP "ODDINARY". On October 16, they topped the Billboard 200 again with their new EP “MAXIDENT". 
+
+# Why might this model be useful?
+
+In such an era of rapid Internet growth, people are building their influence, income and impact through YouTube. For Korean group, YouTube is a good platform to promote and publicize their works. Since it is a worldwide platform, uploading videos on YouTube helps to promote the K-pop culture to people around the world who are interested in it. How do we see the influence of a group? The views of the video is considered as an important factor to reflect the popularity. This model will predict the future views of the music video based on the data collected and thus help analyzing the popularity to look into the future development of the band.
+
+Here are some examples of Stray Kids' music videos:
+```{r}
+library(vembedr)
+# "Case 143" (Lead single of album "MAXIDENT")
+embed_youtube("jYSlpC6Ud2A")
+```
+
+```{r}
+# "Thunderous" (Lead single of album "NOEASY")
+embed_youtube("EaswWiwMVs8")
+```
+
+```{r}
+# "Venom" (side track of album "Oddinary")
+embed_youtube("pM-jOfy_1jM")
+```
+
+# Loading Data and Packages
+
+This project uses the YouTube API for data scraping, which contains information of all videos posted on YouTube. For convenience, I use the tuber package in R by Gaurav Sood that based on the YouTube data API. 
+
+The full codebook is in my files. Here are some important variables of this report: 
+
+- view count
+- like count
+- comment count
+
+```{r,echo = T,message=FALSE}
+# loading packages
+library(tidyverse)
+library(lubridate)
+library(tidymodels)
+library(skimr)
+library(patchwork)
+library(janitor)
+library(parsedate)
+library(dbplyr)
+library(corrplot)
+library(pheatmap)
+library(caret)
+library(pROC)
+```
+
+# Exploratory data analysis
+
+```{r}
+# reading data
+channel<- read.csv(file = "/Users/yzhou/PSTAT131/final project/skz_channel_data.csv")
+playlist<- read.csv(file = "/Users/yzhou/PSTAT131/final project/skz_all_playlist_data.csv")
+trainskz<- read.csv(file = "/Users/yzhou/PSTAT131/final project/skz_all_videos_raw_data.csv")
+```
+
+## Data Cleaning
+
+The collected data was already pretty tidy, but we can do few steps to make it tidier for easier work later. 
+
+```{r}
+# clean names
+trainskz <- trainskz %>% 
+  clean_names()
+```
+
+```{r}
+# remove unimportant variables 
+trainskz <- trainskz %>%
+  select(-description, -title, -channel_id, -favorite_count, -url, -channel_title)
+```
+
+I remove favorite count here because it is 0 for all the videos so it is meaningless to include it. 
+
+```{r}
+# create date into lubridate format
+trainskz <- trainskz %>% 
+  mutate(
+    date = parse_date(publication_date),
+    date_wo_time = format(as.POSIXct(date,
+                  format = '%m/%d/%Y %H:%M:%S'),
+       format = '%Y/%m/%d'),
+    year = year(date)
+  )
+
+```
+ 
+```{r}
+# remove the live video with 0 view and remove rows with NA
+trainskz <- trainskz %>%
+  filter(view_count != 0) %>%
+  drop_na()
+```
+
+Show the data and the demension. 
+```{r}
+# show the data
+trainskz %>%
+  head()
+# data size
+dim(trainskz)
+```
+The data set contains 680 observations. 
+
+## EDA
+
+```{r}
+# mean, standard deviation, median, min and max
+summary(trainskz)
+```
+
+We can compare the ratio of view count and like count, and view count and comment count.
+
+```{r}
+# ratio of view count and like count
+ratio_view_like<- trainskz$view_count/trainskz$like_count
+max(ratio_view_like)
+min(ratio_view_like)
+# ratio of view count and comment count
+ratio_view_comment<- trainskz$view_count/trainskz$comment_count
+max(ratio_view_comment)
+min(ratio_view_comment)
+```
+
+We can find that views are much more than comments and likes.
+
+Create a box plot to see the distribution of the data. 
+
+```{r}
+skz_features <- trainskz %>% 
+  select(view_count,like_count,comment_count,year)
+stack_skz_features <- stack(skz_features)
+ggplot(stack_skz_features, aes(x=ind, y=values,fill=ind)) + 
+  geom_boxplot(outlier.size = 1)+
+  coord_cartesian(ylim = c(0, 8000000))
+```
+
+We can discover that these features (view count,like count,comment count) have many outliers, especially view count. Thus, we need to use logarithmic transformations for these features. 
+
+```{r}
+# logarithmic transformations
+features_2 <- select(skz_features,-year) 
+log_features <- log(features_2) %>% 
+  stack() %>%
+  filter_all(all_vars(!is.infinite(.)))
+# visualize data distribution
+# histogram
+log_features %>% 
+  ggplot(aes(x=values)) +
+  geom_histogram(bins = 30, colour = "black", fill = "blue") +
+  facet_wrap(~ ind)
+# density curve
+log_features %>% 
+  ggplot(aes(x=values)) +
+  geom_density(color="red",alpha=0.8)+
+  facet_wrap(~ ind)
+```
+
+We can find that the view count and the comment count is positively skewed and the like count is slight positively(right) skewed. 
+ 
+The we create a correlation matrix and a heat map.
+```{r}
+# create a correlation matrix for these features
+cor_features <- cor(skz_features)
+corrplot(cor_features)
+# create a heat map
+pheatmap(cor_features,
+         display_numbers = TRUE,
+         number_color = "black", 
+         fontsize_number = 8)
+```
+
+From the matrix and the heatmap we can find that there are 2 features that have a strong positive correlation to views, namely the like count, and the comment_count. Larger values show stronger correlation. 
+
+# Model Building
+## Data split
+
+Then, we will start building machine learning models to predict the views for the youTube video. Here I make a split to the data with 80% of training, and 20% of testing. 
+
+```{r}
+# set seed
+set.seed(2772)
+```
+
+I will use z-score standardization for normalization of the data due to the outliers.  
+```{r}
+# normalization of dataset
+# define function
+min_max_norm <- function(x) {
+  (x - min(x)) / (max(x) - min(x))
+}
+#apply Min-Max normalization to skz features
+skz_norm <- lapply(skz_features[1:3], min_max_norm) 
+skz_norm.df<- data.frame(skz_norm)
+summary(skz_norm.df)
+skz_norm.df %>% head()
+```
+
+```{r}
+# split the data into a training set and a training set
+skz_split <- skz_norm.df %>% 
+  initial_split(prop = 0.8)
+skz_train <- training(skz_split)
+skz_test <- testing(skz_split)
+# showing dimensions
+dim(skz_train)
+dim(skz_test)
+```
+
+When the data set is relatively small (680 observations), a proportion of 80:20 is suitable. There are more observations in the training set than in the testing set. Each data set has approximately the right observations, 544 is about 80% of the observations.
+
+## Building model
+
+I decide to fit the following four models with k-fold cross validation:
+
+- simple linear regression
+- K-Nearest Neighbors
+- Random Forest
+- Decision Tree
+
+```{r}
+# Setting recipe
+recipe <- recipe(
+  view_count ~ ., data = skz_train) %>% 
+  step_center(all_predictors()) %>% 
+  step_scale(all_predictors())
+```
+
+#### Linear regression
+```{r}
+# using simple linear regression to predict the view
+lm <- train(view_count ~ like_count + comment_count, 
+             data = skz_train, method = "lm")
+test_lm <- predict(lm, skz_test)
+```
+
+```{r}
+# show model
+lm
+# save RMSE, R-squared, MAE info   
+lm_summary<- c(0.0404307,0.8267833,0.02250885)
+```
+
+Show AUC. 
+```{r,message=FALSE}
+# auc
+auc_lm <- multiclass.roc(skz_test$view_count, as.numeric(test_lm))
+auc(auc_lm)
+# Multi-class area under the curve: 1
+```
+
+```{r}
+# tune linear regression
+lm_tune <- train(recipe,
+                 data = skz_train,
+                 method = "lm",
+                 trControl = trainControl(method = "cv"))
+# apply the model to the test data
+test_lm_tune <- predict(lm_tune, skz_test)
+```
+
+```{r}
+# show model
+lm_tune
+# save RMSE, R-squared, MAE info   
+lmt_summary<- c(0.03729227,0.8479538,0.02190144)
+```
+
+Show AUC. 
+```{r,message=FALSE}
+# auc
+auc_lm_tune <- multiclass.roc(skz_test$view_count, as.numeric(test_lm_tune))
+auc(auc_lm_tune)
+# Multi-class area under the curve: 1
+```
+
+#### K-Nearest Neighbors
+```{r}
+# using knn to predict the view
+knn <- train(view_count ~ like_count + comment_count, 
+             data = skz_train, method = "knn")
+# apply the model to the test data
+test_knn <- predict(knn, skz_test)
+# plot knn
+plot(knn)
+```
+
+```{r}
+# show model
+knn
+# save RMSE, R-squared, MAE info   
+knn_summary<- c(0.04042132,0.8368424,0.01423769)
+```
+
+Show AUC.
+```{r,message=FALSE}
+# auc
+auc_knn <- multiclass.roc(skz_test$view_count, as.numeric(test_knn)) 
+auc(auc_knn)
+# Multi-class area under the curve: 0.9993
+```
+
+```{r}
+# tuning the knn model with k-fold (10) cross validation
+knn_trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+knn_tune <- train(view_count ~ like_count+comment_count, 
+                  data = skz_train, method = "knn",
+                  trControl = knn_trctrl,
+                  preProcess = c("center", "scale"),
+                  tuneLength = 10)
+# apply the model to the test data
+test_knn_tune <- predict(knn_tune,skz_test)
+plot(knn_tune)
+```
+
+```{r}
+# show model
+knn_tune
+# save RMSE, R-squared, MAE info   
+knnt_summary<- c(0.03762592,0.8506655,0.01403531)
+```
+
+Show AUC.
+```{r,message=FALSE}
+auc_knn_tune <- multiclass.roc(skz_test$view_count, as.numeric(test_knn_tune))
+auc(auc_knn_tune)
+# Multi-class area under the curve: 0.9994
+```
+
+#### Random Forest
+```{r}
+# using random forest to predict the view
+rf <- train(view_count ~ like_count + comment_count, 
+             data = skz_train, method = "rf")
+# apply to test data
+test_rf <- predict(rf, skz_test)
+```
+
+```{r}
+# show model
+rf
+# save RMSE, R-squared, MAE info   
+rf_summary<- c(0.04181941,0.8253298,0.01468354)
+```
+
+Show AUC.
+```{r,message=FALSE}
+auc_rf <- multiclass.roc(skz_test$view_count, as.numeric(test_rf))
+auc(auc_rf)
+# Multi-class area under the curve: 0.9999
+```
+
+#### Decision Tree
+```{r}
+# using decision tree to predict
+dtree <- train(view_count ~ like_count + comment_count, 
+             data = skz_train, method = 'rpart')
+# apply to test data
+test_dtree <- predict(dtree, skz_test)
+```
+
+```{r}
+# show model
+dtree
+# save RMSE, R-squared, MAE info   
+dt_summary<- c(0.04712941, 0.7640025, 0.02036712)
+```
+
+Show AUC.
+```{r,message=FALSE}
+auc_dtree <- multiclass.roc(skz_test$view_count, as.numeric(test_dtree))
+auc(auc_dtree)
+# Multi-class area under the curve: 0.6221
+```
+
+```{r}
+# tuning the decision tree model by using cross validation
+dtree_grid <- expand.grid(cp = seq(0, 0.001, 0.0001))
+dtree_trCtrl <- trainControl(method = 'repeatedcv', number = 10, repeats = 10)
+dtree_tune <- train(view_count ~ like_count + comment_count, 
+             data = skz_train, method = 'rpart',
+                    parms = list(split = 'gini'),
+                    trControl = dtree_trCtrl,
+                    tuneGrid = dtree_grid)
+# apply to the test data
+test_dtree_tune <- predict(dtree_tune, skz_test)
+```
+
+```{r}
+# show model
+dtree_tune
+# save RMSE, R-squared, MAE info   
+dtt_summary<- c(0.04214749, 0.8388049, 0.01539075)
+```
+
+Show AUC.
+```{r,message=FALSE}
+auc_dtree_tune <- multiclass.roc(skz_test$view_count, as.numeric(test_dtree_tune))
+auc(auc_dtree_tune)
+# Multi-class area under the curve: 0.9478
+```
+
+# Analysis the Result
+
+Now we can summarize the results we get from each of the model we generate. 
+```{r}
+AUC <- c(auc(auc_lm),auc(auc_lm_tune),auc(auc_knn),auc(auc_knn_tune),auc(auc_dtree),
+         auc(auc_dtree_tune),auc(auc_rf))
+Model <- c('lm',"lm(tuned)",'knn',"knn(tuned)",'decision tree','decision tree(Tuned)',
+           'random forest')
+RMSE <- c(lm_summary[1],lmt_summary[1],knn_summary[1],knnt_summary[1],dt_summary[1],dtt_summary[1],rf_summary[1])
+Rsquared <- c(lm_summary[2],lmt_summary[2],knn_summary[2],knnt_summary[2],dt_summary[2],dtt_summary[2],rf_summary[2])
+MAE <- c(lm_summary[3],lmt_summary[3],knn_summary[3],knnt_summary[3],dt_summary[3],dtt_summary[3],rf_summary[3])
+
+# create a dataframe to combine and compare results
+Summarized_result <- data.frame(Model, AUC, RMSE, Rsquared, MAE)
+Summarized_result
+```
+
+First we can take a look at AUC, the area under the ROC Curve. In general, a test with AUC between 0.90 and 1.00 has excellent discrimination ability. Since our model is not a classification model, it's not meaningful to focus on it. Then we look at the other three. RMSE is the standard deviation of the residuals (prediction errors) that it indicates how close the observed data points are to the model's predicted values. The lower the RMSE, the better the model and its predictions. The tuned linear regression model has the lowest RMSE. R-squared represents the proportion of the variance for a dependent variable that's explained by an independent variable. Higher R-squared means stronger correlation. The tuned knn model has the highest $R^2$. MAE is the magnitude of difference between the prediction of an observation and the true value of that observation. MAE can tell us how big of an error we can expect from the forecast on average. The closer MAE is to 0, the more accurate the model is. Here, the tuned knn model has the lowest MAE. So based on the results, we can say that the tuned knn model fits the best. And other than the tuned knn model, the random forest model also performs pretty good. 
+
+# Conclusion
+Through research, testing, and analysis, the best model to predict the potential views of YouTube videos is the KNN model, but it was not perfect. It was not able to accurately predict the views since the dataset is actually very restricted. It is better for a model to predict when the predictors are vary. Unlike other channels, the channel I picked uploads all the videos of the same type, although they are not suppose to. At first I tried to classified them into different category, but I found it was such a big work. So I decided not to differentiate them which also leads to the perfection of the model later. I originally intended to create a 
+confusion matrix to show the accuracy of the model but the levels of my prediction did not fit my original data. I think it might due to the transformation from numeric values to factor values. So I use the RMSE,r-squared, mae to analysis instead. Also, in the future, if there's a chance to do a project like this, it is important to consider more models and other machine learning algorithms, when attempting to accurately predict the view count of the YouTube videos for a specific channel.
+Overall, this YouTube views prediction model project provided me a great opportunity to play with machine learning techniques, and reinforced my desire to learn deeper in machine learning. 
